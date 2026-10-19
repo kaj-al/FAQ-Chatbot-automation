@@ -1,0 +1,382 @@
+{
+  "name": "faq_chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "faq-chat",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -976,
+        -288
+      ],
+      "id": "15f2a955-991c-4efe-99a7-b7cd9b0823df",
+      "name": "Chat",
+      "webhookId": "a3061454-c6d4-4368-99f2-d6d66d3a9983"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst msg = String(body.message || \"\").trim().slice(0, 1000);\nif (!msg) throw new Error(\"message is empty\");\n\nconst now = new Date();\nlet sid = String(body.session_id || \"\").replace(/[^A-Za-z0-9_-]/g, \"\");\nif (!sid) sid = \"anon-\" + now.toISOString().replace(/[^0-9]/g, \"\");\n\nreturn [{ json: { session_id: sid, message: msg, ts: now.toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        -288
+      ],
+      "id": "634adb59-ceb2-4f1c-9396-2cfa18f7a8a6",
+      "name": "Normalize Input"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=FAQ:{{ $json.kb }}\nUser question: {{ $json.message }}",
+        "options": {
+          "systemMessage": "You are a scheduling support assistant.\nAlways reply in the language and script the user last wrote in.\n(Hindi typed in English letters gets a reply in the same style.)\n\nUse ONLY the facts in the FAQ below. If a phone number, time, price or\npolicy is not written in the FAQ, do not state it.\nYou cannot book, change or cancel appointments. Say so if asked.\n\n\nIf the FAQ does not cover the question, say you don't know and that a\nhuman will follow up, then call notify_team with the question.\nNever call notify_team when the FAQ already has the answer.\n\nFAQ:\n{{ $json.kb }}",
+          "maxIterations": 3,
+          "returnIntermediateSteps": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -160,
+        -288
+      ],
+      "id": "62914542-73d8-402b-a8f1-28c5c86a5241",
+      "name": "AI Agent",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "maxTokensToSample": 4000,
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -432,
+        -32
+      ],
+      "id": "d80fb068-c4fd-42d3-8542-6fc129f30b18",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "sn8qCXYCniKH1IsD",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalize Input').item.json.session_id }}",
+        "contextWindowLength": 8
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.4,
+      "position": [
+        -272,
+        -32
+      ],
+      "id": "aa1eb582-6d8d-477b-8b39-86323b315006",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "qHlMfjK3yNDxjm2C",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Checks free time in the business calendar between two datetimes. Use only when the user asks about available slots.",
+        "resource": "calendar",
+        "calendar": {
+          "__rl": true,
+          "value": "callisto2519033@gmail.com",
+          "mode": "list",
+          "cachedResultName": "callisto2519033@gmail.com"
+        },
+        "timeMin": "={{ $fromAI('start_time','Range start,ISO 8601','string') }}",
+        "timeMax": "={{ $fromAI('end_time','Range end,ISO 8601','string') }}",
+        "options": {
+          "outputFormat": "availability",
+          "timezone": {
+            "__rl": true,
+            "value": "Asia/Kolkata",
+            "mode": "list",
+            "cachedResultName": "Asia/Kolkata"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        -64,
+        -32
+      ],
+      "id": "9b0c55c0-33f4-496e-af04-df6393ddf4a6",
+      "name": "Check_availability",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "tva6i5lpDsHMJN3G",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Emails the support team when FAQ and calendar cannot answer question",
+        "sendTo": "callisto2519033@gmail.com",
+        "subject": "FAQ bot: unanswered question",
+        "emailType": "text",
+        "message": "=Session:{{ $('Normalize Input').item.json.sesssion_id }}+new line+{{ $fromAI('question','The unanswered user question','string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        160,
+        -48
+      ],
+      "id": "8c377413-39f6-412a-9132-f2288607e5e5",
+      "name": "notify_team",
+      "webhookId": "f0e95d75-c690-4526-85f0-866d1e1885d2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SPcqKnpsk9zWyLsz",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const norm = $('Normalize Input').first().json;\nreturn [{ json: {\n  output: \"Sorry, something went wrong on our side. Please try again in a minute.\",\n  session_id: norm.session_id,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -176
+      ],
+      "id": "38ffb13f-7775-4957-ba4b-56520f2df4a1",
+      "name": "fallback_reply"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ reply: $json.output, session_id: $('Normalize Input').item.json.session_id }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "http://localhost:5678"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        320,
+        -352
+      ],
+      "id": "1f62ce42-180d-4d53-9f30-007748819561",
+      "name": "send_reply"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1DtlShOelrr6XyHzCfMjnuS0W9q4jzcC2YvTfveNd32I",
+          "mode": "list",
+          "cachedResultName": "faq_sheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DtlShOelrr6XyHzCfMjnuS0W9q4jzcC2YvTfveNd32I/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 464343695,
+          "mode": "list",
+          "cachedResultName": "FAQ",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1DtlShOelrr6XyHzCfMjnuS0W9q4jzcC2YvTfveNd32I/edit#gid=464343695"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -576,
+        -288
+      ],
+      "id": "c01f6d95-aaf2-4c27-8d30-d4704c3b2db2",
+      "name": "Get row(s) in sheet",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "xm3pNENv9z45vaLd",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const faq = $input.all().map(i => i.json);\nconst kb = faq\n  .filter(r => r.answer)\n  .map(r => `[${r.topic}] Q: ${r.question} A: ${r.answer}`)\n  .join(\"\\n\");\n\nconst norm = $('Normalize Input').first().json;\nreturn [{ json: { session_id: norm.session_id, message: norm.message, kb } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        -288
+      ],
+      "id": "991a397f-7e3c-4bf3-9607-8adac3b85c0c",
+      "name": "Build Context"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "send_reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "fallback_reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "notify_team": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fallback_reply": {
+      "main": [
+        []
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e406dfca-bc30-44e4-b639-058faa832ee4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7198b440318b74fe653bce9f75ec013ae8a9eb1fc570ee5b7e8bfa1e01ef39a6"
+  },
+  "nodeGroups": [],
+  "id": "SXdA43qmgAEQjPHv",
+  "tags": []
+}
